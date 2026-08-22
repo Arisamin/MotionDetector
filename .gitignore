@@ -12,4 +12,6 @@ snapshots/*
 *.mp4
 *.avi
 *.mkv
+.env
+config.json
 .DS_Store

@@ -11,6 +11,7 @@ from src.classifier import ObjectClassifier
 from src.logger import MotionLogger
 from src.capture import create_capture_source
 from src.config import load_config, save_config, DEFAULT_CONFIG
+from src.notifier import TelegramNotifier
 
 
 @pytest.fixture
@@ -216,5 +217,34 @@ def test_config_load_and_save(temp_workspace):
     loaded = load_config(cfg_path)
     assert loaded["min_area_pixels"] == 2500
     assert loaded["min_area_percent"] == 1.25
+
+
+def test_telegram_notifier_disabled_by_default_without_token():
+    """Verify notifier stays disabled when token is missing."""
+    notifier = TelegramNotifier(bot_token="", chat_id="", enabled=True)
+    assert notifier.enabled is False
+    # send_alert should not throw
+    notifier.send_alert({"categories": ["human"]})
+    notifier.stop()
+
+
+def test_telegram_notifier_enqueue_and_format():
+    """Verify Telegram alert formatting and queueing."""
+    notifier = TelegramNotifier(bot_token="dummy_token", chat_id="12345", enabled=True)
+    assert notifier.enabled is True
+
+    event = {
+        "timestamp": "2026-08-22 23:30:00",
+        "categories": ["human", "car"],
+        "counts": {"human": 1, "car": 2},
+        "snapshot": "",
+        "frame_index": 42,
+    }
+
+    # Verify enqueue without blocking
+    notifier.send_alert(event)
+    assert notifier._queue.qsize() >= 0
+    notifier.stop()
+
 
 

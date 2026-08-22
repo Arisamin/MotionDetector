@@ -10,6 +10,7 @@ from src.logger import MotionLogger
 from src.capture import create_capture_source
 from src.config import load_config
 from src.calibrator import run_calibration
+from src.notifier import TelegramNotifier
 
 
 def parse_args():
@@ -41,6 +42,30 @@ def parse_args():
         "--headless",
         action="store_true",
         help="Run in headless mode (no GUI window displayed). Recommended for servers / background runs.",
+    )
+    parser.add_argument(
+        "--telegram",
+        action="store_true",
+        default=cfg.get("telegram_enabled", False),
+        help="Enable Telegram notifications for motion events.",
+    )
+    parser.add_argument(
+        "--no-telegram",
+        action="store_false",
+        dest="telegram",
+        help="Disable Telegram notifications.",
+    )
+    parser.add_argument(
+        "--telegram-token",
+        type=str,
+        default=cfg.get("telegram_bot_token", ""),
+        help="Telegram Bot API Token (can also be configured via config.json or TELEGRAM_BOT_TOKEN env var).",
+    )
+    parser.add_argument(
+        "--telegram-chat-id",
+        type=str,
+        default=cfg.get("telegram_chat_id", ""),
+        help="Telegram Chat/Group ID (e.g. -1004474060156).",
     )
     parser.add_argument(
         "--model",
@@ -154,6 +179,15 @@ def run_pipeline(args):
         cooldown_seconds=args.cooldown,
         active_sections=active_sections,
     )
+    notifier = TelegramNotifier(
+        bot_token=args.telegram_token,
+        chat_id=args.telegram_chat_id,
+        enabled=args.telegram,
+    )
+    if notifier.enabled:
+        print("[INFO] Telegram Notifications: ENABLED (Group: ReolinkMotionDetector)")
+    else:
+        print("[INFO] Telegram Notifications: DISABLED")
 
     frame_count = 0
     total_events = 0
@@ -185,7 +219,7 @@ def run_pipeline(args):
             if motion_res["has_motion"]:
                 detections = classifier.classify_frame(frame, motion_boxes=motion_res["boxes"])
 
-            # Step 3: Log events and save snapshots
+            # Step 3: Log events, save snapshots, and notify Telegram
             if detections:
                 event = logger.log_event(frame, detections, frame_idx=frame_count, fps=fps)
                 if event:
@@ -195,6 +229,9 @@ def run_pipeline(args):
                         category_totals[c] = category_totals.get(c, 0) + 1
                     cats_str = ", ".join(cats)
                     print(f"[{event['timestamp']}] [Frame #{frame_count:05d}] Motion Detected: [{cats_str}] (FPS: {fps:.1f})")
+
+                    # Dispatch Telegram alert (non-blocking)
+                    notifier.send_alert(event)
 
             # Step 4: Display GUI window if not in headless mode
             if not args.headless:
@@ -216,6 +253,7 @@ def run_pipeline(args):
         print("\n[INFO] Interrupted by user.")
     finally:
         source.release()
+        notifier.stop()
         if not args.headless:
             cv2.destroyAllWindows()
 

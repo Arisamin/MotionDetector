@@ -1,8 +1,0 @@
-{
-    "min_area_pixels": 6084,
-    "min_area_percent": 0.2934,
-    "sections": "1_2_3_4",
-    "cooldown_seconds": 1.0,
-    "model": "yolov8n.pt",
-    "confidence_threshold": 0.35
-}

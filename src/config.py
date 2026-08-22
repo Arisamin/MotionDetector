@@ -11,6 +11,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "cooldown_seconds": 1.0,
     "model": "yolov8n.pt",
     "confidence_threshold": 0.35,
+    "telegram_enabled": True,
+    "telegram_bot_token": "",
+    "telegram_chat_id": "",
 }
 
 CONFIG_FILE = "config.json"
