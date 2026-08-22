@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+logs/*
+!logs/.gitkeep
+snapshots/*
+!snapshots/.gitkeep
+*.pt
+*.mp4
+*.avi
+*.mkv
+.DS_Store

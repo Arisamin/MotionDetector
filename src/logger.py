@@ -1,0 +1,186 @@
+"""Event logging and snapshot recording module for motion detections."""
+import os
+import csv
+import json
+import time
+from datetime import datetime
+from typing import List, Dict, Any, Optional
+import cv2
+import numpy as np
+
+
+class MotionLogger:
+    """Logs motion events to CSV/JSON files and captures snapshot images."""
+
+    def __init__(
+        self,
+        log_dir: str = "logs",
+        snapshot_dir: str = "snapshots",
+        cooldown_seconds: float = 2.0,
+        draw_annotations: bool = True,
+    ):
+        """
+        Initialize the motion logger.
+
+        :param log_dir: Directory to store log files.
+        :param snapshot_dir: Directory to save snapshot images.
+        :param cooldown_seconds: Minimum seconds between snapshot saves for consecutive frames.
+        :param draw_annotations: Whether to draw bounding boxes and labels on saved snapshots.
+        """
+        self.log_dir = log_dir
+        self.snapshot_dir = snapshot_dir
+        self.cooldown_seconds = cooldown_seconds
+        self.draw_annotations = draw_annotations
+
+        os.makedirs(self.log_dir, exist_ok=True)
+        os.makedirs(self.snapshot_dir, exist_ok=True)
+
+        # File paths
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        self.csv_path = os.path.join(self.log_dir, f"motion_events_{date_str}.csv")
+        self.json_path = os.path.join(self.log_dir, f"motion_events_{date_str}.jsonl")
+
+        self.last_snapshot_time: Dict[str, float] = {}
+        self._init_csv()
+
+    def _init_csv(self):
+        """Initialize CSV header if file is new."""
+        if not os.path.exists(self.csv_path) or os.path.getsize(self.csv_path) == 0:
+            with open(self.csv_path, mode="w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    "timestamp",
+                    "event_id",
+                    "categories_detected",
+                    "human_count",
+                    "car_count",
+                    "other_count",
+                    "details_json",
+                    "snapshot_path"
+                ])
+
+    def log_event(
+        self,
+        frame: np.ndarray,
+        detections: List[Dict[str, Any]],
+        frame_idx: int = 0,
+        fps: float = 0.0,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Log a detection event and optionally save a snapshot.
+
+        :param frame: Current BGR frame.
+        :param detections: List of detection dictionaries from ObjectClassifier.
+        :param frame_idx: Frame index in the stream/video.
+        :param fps: Estimated FPS of processing.
+        :return: Event summary dictionary or None if no detections.
+        """
+        if not detections:
+            return None
+
+        now = datetime.now()
+        timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        event_id = f"evt_{now.strftime('%Y%m%d_%H%M%S_%f')}"
+
+        # Group counts by category
+        categories = [d["category"] for d in detections]
+        human_count = categories.count("human")
+        car_count = categories.count("car")
+        other_count = categories.count("other")
+        unique_categories = sorted(list(set(categories)))
+
+        # Snapshot saving with cooldown check
+        current_time = time.time()
+        should_save_snapshot = True
+        primary_category = unique_categories[0] if unique_categories else "other"
+        
+        last_time = self.last_snapshot_time.get(primary_category, 0.0)
+        if current_time - last_time < self.cooldown_seconds:
+            should_save_snapshot = False
+
+        snapshot_path = ""
+        if should_save_snapshot and frame is not None and frame.size > 0:
+            self.last_snapshot_time[primary_category] = current_time
+            snap_filename = f"{now.strftime('%Y%m%d_%H%M%S')}_{primary_category}_{event_id[-4:]}.jpg"
+            snapshot_path = os.path.join(self.snapshot_dir, snap_filename)
+
+            snap_frame = frame.copy()
+            if self.draw_annotations:
+                snap_frame = self.annotate_frame(snap_frame, detections)
+
+            cv2.imwrite(snapshot_path, snap_frame)
+
+        event_data = {
+            "timestamp": timestamp_str,
+            "event_id": event_id,
+            "frame_index": frame_idx,
+            "fps": round(fps, 1),
+            "categories": unique_categories,
+            "counts": {
+                "human": human_count,
+                "car": car_count,
+                "other": other_count,
+            },
+            "detections": detections,
+            "snapshot": snapshot_path,
+        }
+
+        # Write to JSONL
+        with open(self.json_path, mode="a", encoding="utf-8") as f:
+            f.write(json.dumps(event_data, ensure_ascii=False) + "\n")
+
+        # Write to CSV
+        with open(self.csv_path, mode="a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                timestamp_str,
+                event_id,
+                "|".join(unique_categories),
+                human_count,
+                car_count,
+                other_count,
+                json.dumps(detections, ensure_ascii=False),
+                snapshot_path,
+            ])
+
+        return event_data
+
+    @staticmethod
+    def annotate_frame(frame: np.ndarray, detections: List[Dict[str, Any]]) -> np.ndarray:
+        """Draw bounding boxes and category labels on a copy of the frame."""
+        annotated = frame.copy()
+        
+        # Color mapping: BGR
+        colors = {
+            "human": (0, 0, 255),    # Red
+            "car": (255, 128, 0),    # Blue / Cyan
+            "other": (0, 255, 0),    # Green
+        }
+
+        for d in detections:
+            cat = d.get("category", "other")
+            raw = d.get("raw_label", "")
+            conf = d.get("confidence", 0.0)
+            bbox = d.get("bbox", [0, 0, 0, 0])
+            x1, y1, x2, y2 = bbox
+
+            color = colors.get(cat, (0, 255, 255))
+            # Box
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+
+            # Label
+            label_text = f"{cat.upper()} ({raw} {conf:.2f})"
+            (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            cv2.rectangle(annotated, (x1, max(0, y1 - 20)), (x1 + tw + 6, max(20, y1)), color, -1)
+            cv2.putText(
+                annotated,
+                label_text,
+                (x1 + 3, max(15, y1 - 5)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+        return annotated
