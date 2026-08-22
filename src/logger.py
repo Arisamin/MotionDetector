@@ -16,7 +16,7 @@ class MotionLogger:
         self,
         log_dir: str = "logs",
         snapshot_dir: str = "snapshots",
-        cooldown_seconds: float = 2.0,
+        cooldown_seconds: float = 1.0,
         draw_annotations: bool = True,
     ):
         """
@@ -24,7 +24,7 @@ class MotionLogger:
 
         :param log_dir: Directory to store log files.
         :param snapshot_dir: Directory to save snapshot images.
-        :param cooldown_seconds: Minimum seconds between snapshot saves for consecutive frames.
+        :param cooldown_seconds: Minimum seconds between reporting consecutive motion events.
         :param draw_annotations: Whether to draw bounding boxes and labels on saved snapshots.
         """
         self.log_dir = log_dir
@@ -40,6 +40,7 @@ class MotionLogger:
         self.csv_path = os.path.join(self.log_dir, f"motion_events_{date_str}.csv")
         self.json_path = os.path.join(self.log_dir, f"motion_events_{date_str}.jsonl")
 
+        self.last_event_time: float = 0.0
         self.last_snapshot_time: Dict[str, float] = {}
         self._init_csv()
 
@@ -78,6 +79,13 @@ class MotionLogger:
         if not detections:
             return None
 
+        # Check event reporting cooldown
+        current_time = time.time()
+        if self.last_event_time > 0 and (current_time - self.last_event_time < self.cooldown_seconds):
+            return None
+
+        self.last_event_time = current_time
+
         now = datetime.now()
         timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         event_id = f"evt_{now.strftime('%Y%m%d_%H%M%S_%f')}"
@@ -89,18 +97,10 @@ class MotionLogger:
         other_count = categories.count("other")
         unique_categories = sorted(list(set(categories)))
 
-        # Snapshot saving with cooldown check
-        current_time = time.time()
-        should_save_snapshot = True
-        primary_category = unique_categories[0] if unique_categories else "other"
-        
-        last_time = self.last_snapshot_time.get(primary_category, 0.0)
-        if current_time - last_time < self.cooldown_seconds:
-            should_save_snapshot = False
-
+        # Snapshot saving
         snapshot_path = ""
-        if should_save_snapshot and frame is not None and frame.size > 0:
-            self.last_snapshot_time[primary_category] = current_time
+        if frame is not None and frame.size > 0:
+            primary_category = unique_categories[0] if unique_categories else "other"
             snap_filename = f"{now.strftime('%Y%m%d_%H%M%S')}_{primary_category}_{event_id[-4:]}.jpg"
             snapshot_path = os.path.join(self.snapshot_dir, snap_filename)
 

@@ -46,8 +46,8 @@ def parse_args():
     parser.add_argument(
         "--cooldown",
         type=float,
-        default=2.0,
-        help="Minimum seconds between snapshot captures (default: 2.0).",
+        default=1.0,
+        help="Minimum seconds after motion detection before reporting/logging another motion event (default: 1.0).",
     )
     parser.add_argument(
         "--max-frames",

@@ -87,6 +87,31 @@ def test_logger_creates_csv_and_json(temp_workspace):
     assert os.path.exists(event["snapshot"])
 
 
+def test_logger_cooldown_debounces_reports(temp_workspace):
+    """Verify that events within cooldown_seconds are throttled."""
+    import time
+    log_dir = os.path.join(temp_workspace, "logs")
+    snap_dir = os.path.join(temp_workspace, "snaps")
+    logger = MotionLogger(log_dir=log_dir, snapshot_dir=snap_dir, cooldown_seconds=1.0)
+
+    dummy_frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    detections = [{"category": "human", "raw_label": "person", "confidence": 0.9, "bbox": [10, 10, 50, 50]}]
+
+    # First event should be logged
+    evt1 = logger.log_event(dummy_frame, detections)
+    assert evt1 is not None
+
+    # Immediate second event (within 1.0s) should be suppressed
+    evt2 = logger.log_event(dummy_frame, detections)
+    assert evt2 is None
+
+    # Wait for cooldown to expire
+    time.sleep(1.05)
+    evt3 = logger.log_event(dummy_frame, detections)
+    assert evt3 is not None
+
+
+
 def test_end_to_end_synthetic_video_pipeline(temp_workspace):
     """Generate a synthetic video and run the pipeline from end to end."""
     video_path = os.path.join(temp_workspace, "test_feed.mp4")
