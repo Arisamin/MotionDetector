@@ -4,7 +4,7 @@ import csv
 import json
 import time
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 import cv2
 import numpy as np
 
@@ -18,6 +18,7 @@ class MotionLogger:
         snapshot_dir: str = "snapshots",
         cooldown_seconds: float = 1.0,
         draw_annotations: bool = True,
+        active_sections: Optional[Set[int]] = None,
     ):
         """
         Initialize the motion logger.
@@ -26,11 +27,13 @@ class MotionLogger:
         :param snapshot_dir: Directory to save snapshot images.
         :param cooldown_seconds: Minimum seconds between reporting consecutive motion events.
         :param draw_annotations: Whether to draw bounding boxes and labels on saved snapshots.
+        :param active_sections: Monitored screen sections ({1, 2, 3, 4}).
         """
         self.log_dir = log_dir
         self.snapshot_dir = snapshot_dir
         self.cooldown_seconds = cooldown_seconds
         self.draw_annotations = draw_annotations
+        self.active_sections = active_sections if active_sections is not None else {1, 2, 3, 4}
 
         os.makedirs(self.log_dir, exist_ok=True)
         os.makedirs(self.snapshot_dir, exist_ok=True)
@@ -106,7 +109,7 @@ class MotionLogger:
 
             snap_frame = frame.copy()
             if self.draw_annotations:
-                snap_frame = self.annotate_frame(snap_frame, detections)
+                snap_frame = self.annotate_frame(snap_frame, detections, active_sections=self.active_sections)
 
             cv2.imwrite(snapshot_path, snap_frame)
 
@@ -146,10 +149,35 @@ class MotionLogger:
         return event_data
 
     @staticmethod
-    def annotate_frame(frame: np.ndarray, detections: List[Dict[str, Any]]) -> np.ndarray:
-        """Draw bounding boxes and category labels on a copy of the frame."""
+    def annotate_frame(
+        frame: np.ndarray,
+        detections: List[Dict[str, Any]],
+        active_sections: Optional[Set[int]] = None,
+    ) -> np.ndarray:
+        """Draw bounding boxes, category labels, and section grid on a copy of the frame."""
         annotated = frame.copy()
-        
+        h, w = annotated.shape[:2]
+        x_mid, y_mid = int(w / 2), int(h / 2)
+
+        # Draw 4-section division grid lines
+        grid_color = (60, 60, 60)
+        cv2.line(annotated, (x_mid, 0), (x_mid, h), grid_color, 1)
+        cv2.line(annotated, (0, y_mid), (w, y_mid), grid_color, 1)
+
+        # Draw section corner tags
+        sections_info = [
+            (1, 10, 25),              # Top Left
+            (2, x_mid + 10, 25),      # Top Right
+            (3, 10, y_mid + 25),      # Bottom Left
+            (4, x_mid + 10, y_mid + 25) # Bottom Right
+        ]
+        active = active_sections if active_sections is not None else {1, 2, 3, 4}
+        for sec_num, sx, sy in sections_info:
+            is_active = sec_num in active
+            tag_color = (0, 255, 255) if is_active else (80, 80, 80)
+            tag_text = f"S{sec_num}" + ("" if is_active else " (OFF)")
+            cv2.putText(annotated, tag_text, (sx, sy), cv2.FONT_HERSHEY_SIMPLEX, 0.45, tag_color, 1, cv2.LINE_AA)
+
         # Color mapping: BGR
         colors = {
             "human": (0, 0, 255),    # Red

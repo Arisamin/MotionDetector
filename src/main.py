@@ -4,7 +4,7 @@ import sys
 import time
 import cv2
 
-from src.motion_detector import MotionDetector
+from src.motion_detector import MotionDetector, parse_sections
 from src.classifier import ObjectClassifier
 from src.logger import MotionLogger
 from src.capture import create_capture_source
@@ -19,6 +19,14 @@ def parse_args():
         type=str,
         default="0",
         help="Input source: video file path (.mp4/.avi), RTSP/HTTP stream URL, webcam index (e.g. '0'), or 'screen'.",
+    )
+    parser.add_argument(
+        "--sections",
+        "--zones",
+        type=str,
+        default=None,
+        dest="sections",
+        help="Underscore-separated screen sections to monitor: 1=Top-Left, 2=Top-Right, 3=Bottom-Left, 4=Bottom-Right (e.g. '1_2', '1_3_4'). Default: all sections.",
     )
     parser.add_argument(
         "--headless",
@@ -71,12 +79,17 @@ def parse_args():
 
 
 def run_pipeline(args):
+    active_sections = parse_sections(args.sections)
+    sections_display = "_".join(str(s) for s in sorted(active_sections)) if active_sections != {1, 2, 3, 4} else "All (1_2_3_4)"
+
     print("=" * 60)
     print("      Starting MotionDetector Agent")
     print(f" Source:      {args.source}")
+    print(f" Sections:    {sections_display} (1=TL, 2=TR, 3=BL, 4=BR)")
     print(f" Headless:    {args.headless}")
     print(f" Model:       {args.model} (conf={args.conf})")
     print(f" Min Area:    {args.min_area} px")
+    print(f" Cooldown:    {args.cooldown} s")
     print(f" Logs Dir:    {args.log_dir}")
     print(f" Snapshot:    {args.snapshot_dir}")
     print("=" * 60)
@@ -87,12 +100,13 @@ def run_pipeline(args):
         print(f"[ERROR] Failed to initialize source: {e}", file=sys.stderr)
         return 1
 
-    detector = MotionDetector(min_area=args.min_area)
+    detector = MotionDetector(min_area=args.min_area, active_sections=active_sections)
     classifier = ObjectClassifier(model_name=args.model, confidence_threshold=args.conf)
     logger = MotionLogger(
         log_dir=args.log_dir,
         snapshot_dir=args.snapshot_dir,
         cooldown_seconds=args.cooldown,
+        active_sections=active_sections,
     )
 
     frame_count = 0
@@ -140,9 +154,7 @@ def run_pipeline(args):
 
             # Step 4: Display GUI window if not in headless mode
             if not args.headless:
-                display_frame = frame.copy()
-                if detections:
-                    display_frame = MotionLogger.annotate_frame(display_frame, detections)
+                display_frame = MotionLogger.annotate_frame(frame, detections, active_sections=active_sections)
                 cv2.imshow("MotionDetector Feed", display_frame)
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q") or key == 27:  # 'q' or Esc

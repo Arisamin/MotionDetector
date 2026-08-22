@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import pytest
 
-from src.motion_detector import MotionDetector
+from src.motion_detector import MotionDetector, parse_sections, get_box_sections
 from src.classifier import ObjectClassifier
 from src.logger import MotionLogger
 from src.capture import create_capture_source
@@ -157,3 +157,46 @@ def test_end_to_end_synthetic_video_pipeline(temp_workspace):
     source.release()
     assert events_logged > 0
     assert os.path.exists(logger.csv_path)
+
+
+def test_parse_sections():
+    """Verify parsing of sections string."""
+    assert parse_sections("1_2") == {1, 2}
+    assert parse_sections("1_3_4") == {1, 3, 4}
+    assert parse_sections("4") == {4}
+    assert parse_sections(None) == {1, 2, 3, 4}
+    assert parse_sections("") == {1, 2, 3, 4}
+    assert parse_sections("5_invalid") == {1, 2, 3, 4}
+
+
+def test_section_filtering_ignores_unmonitored_zones():
+    """Verify motion is ignored when it occurs only in unmonitored screen sections."""
+    # Screen size 640x480:
+    # Section 1 (TL): x in [0, 320], y in [0, 240]
+    # Section 4 (BR): x in [320, 640], y in [240, 480]
+
+    bg_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+    # Detector only monitoring Section 1 (Top Left)
+    detector_s1 = MotionDetector(min_area=100, active_sections={1})
+    for _ in range(15):
+        detector_s1.detect(bg_frame)
+
+    # Frame with motion strictly in Section 4 (Bottom Right: x=400..500, y=300..400)
+    frame_motion_in_s4 = bg_frame.copy()
+    cv2.rectangle(frame_motion_in_s4, (400, 300), (500, 400), (255, 255, 255), -1)
+
+    # S1 detector should ignore motion in S4
+    res_s1 = detector_s1.detect(frame_motion_in_s4)
+    assert res_s1["has_motion"] is False
+    assert len(res_s1["boxes"]) == 0
+
+    # Detector monitoring Section 4 should detect it
+    detector_s4 = MotionDetector(min_area=100, active_sections={4})
+    for _ in range(15):
+        detector_s4.detect(bg_frame)
+
+    res_s4 = detector_s4.detect(frame_motion_in_s4)
+    assert res_s4["has_motion"] is True
+    assert len(res_s4["boxes"]) >= 1
+
