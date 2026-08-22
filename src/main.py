@@ -8,9 +8,13 @@ from src.motion_detector import MotionDetector, parse_sections
 from src.classifier import ObjectClassifier
 from src.logger import MotionLogger
 from src.capture import create_capture_source
+from src.config import load_config
+from src.calibrator import run_calibration
 
 
 def parse_args():
+    cfg = load_config()
+
     parser = argparse.ArgumentParser(
         description="Autonomous Motion Detector & Object Classifier Agent for Camera Feeds."
     )
@@ -19,6 +23,11 @@ def parse_args():
         type=str,
         default="0",
         help="Input source: video file path (.mp4/.avi), RTSP/HTTP stream URL, webcam index (e.g. '0'), or 'screen'.",
+    )
+    parser.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="Launch interactive visual calibration mode to adjust and save the minimum motion square size.",
     )
     parser.add_argument(
         "--sections",
@@ -36,25 +45,25 @@ def parse_args():
     parser.add_argument(
         "--model",
         type=str,
-        default="yolov8n.pt",
+        default=cfg.get("model", "yolov8n.pt"),
         help="YOLO model weights to use (default: yolov8n.pt).",
     )
     parser.add_argument(
         "--conf",
         type=float,
-        default=0.35,
+        default=cfg.get("confidence_threshold", 0.35),
         help="Classifier confidence threshold (default: 0.35).",
     )
     parser.add_argument(
         "--min-area",
-        type=int,
-        default=500,
-        help="Minimum contour area in pixels to trigger motion (default: 500).",
+        type=str,
+        default=None,
+        help="Minimum motion area in pixels (e.g. '500') or screen percentage (e.g. '1.0%%'). Default: loaded from config.json.",
     )
     parser.add_argument(
         "--cooldown",
         type=float,
-        default=1.0,
+        default=cfg.get("cooldown_seconds", 1.0),
         help="Minimum seconds after motion detection before reporting/logging another motion event (default: 1.0).",
     )
     parser.add_argument(
@@ -79,7 +88,15 @@ def parse_args():
 
 
 def run_pipeline(args):
-    active_sections = parse_sections(args.sections)
+    if args.calibrate:
+        run_calibration(source_str=args.source)
+        return 0
+
+    cfg = load_config()
+
+    # Determine sections
+    sections_str = args.sections if args.sections is not None else cfg.get("sections", "1_2_3_4")
+    active_sections = parse_sections(sections_str)
     sections_display = "_".join(str(s) for s in sorted(active_sections)) if active_sections != {1, 2, 3, 4} else "All (1_2_3_4)"
 
     print("=" * 60)
@@ -88,7 +105,6 @@ def run_pipeline(args):
     print(f" Sections:    {sections_display} (1=TL, 2=TR, 3=BL, 4=BR)")
     print(f" Headless:    {args.headless}")
     print(f" Model:       {args.model} (conf={args.conf})")
-    print(f" Min Area:    {args.min_area} px")
     print(f" Cooldown:    {args.cooldown} s")
     print(f" Logs Dir:    {args.log_dir}")
     print(f" Snapshot:    {args.snapshot_dir}")
@@ -100,7 +116,37 @@ def run_pipeline(args):
         print(f"[ERROR] Failed to initialize source: {e}", file=sys.stderr)
         return 1
 
-    detector = MotionDetector(min_area=args.min_area, active_sections=active_sections)
+    # Read first frame to determine resolution and area threshold
+    ret, first_frame = source.read()
+    if not ret or first_frame is None:
+        print("[ERROR] Could not read initial frame from source.", file=sys.stderr)
+        source.release()
+        return 1
+
+    h_frame, w_frame = first_frame.shape[:2]
+    total_area = w_frame * h_frame
+
+    # Compute min area in pixels
+    min_area_val = args.min_area
+    if min_area_val is not None:
+        min_area_str = str(min_area_val).strip()
+        if min_area_str.endswith("%"):
+            pct = float(min_area_str.replace("%", ""))
+            min_area_px = int((pct / 100.0) * total_area)
+        else:
+            min_area_px = int(min_area_str)
+    else:
+        # Use config.json values
+        if "min_area_percent" in cfg:
+            min_area_px = int((cfg["min_area_percent"] / 100.0) * total_area)
+        else:
+            min_area_px = int(cfg.get("min_area_pixels", 500))
+
+    min_area_px = max(10, min_area_px)
+    area_percent = (min_area_px / total_area) * 100.0
+    print(f"[INFO] Frame Resolution: {w_frame}x{h_frame} | Min Motion Area: {min_area_px:,} px^2 ({area_percent:.2f}% of screen)")
+
+    detector = MotionDetector(min_area=min_area_px, active_sections=active_sections)
     classifier = ObjectClassifier(model_name=args.model, confidence_threshold=args.conf)
     logger = MotionLogger(
         log_dir=args.log_dir,
@@ -116,13 +162,11 @@ def run_pipeline(args):
     last_fps_time = start_time
     fps = 0.0
 
-    try:
-        while True:
-            ret, frame = source.read()
-            if not ret or frame is None:
-                print("\n[INFO] End of stream / no more frames.")
-                break
+    frame = first_frame
+    has_frame = True
 
+    try:
+        while has_frame and frame is not None:
             frame_count += 1
             now = time.time()
 
@@ -164,6 +208,9 @@ def run_pipeline(args):
             if args.max_frames > 0 and frame_count >= args.max_frames:
                 print(f"\n[INFO] Reached max frames limit ({args.max_frames}).")
                 break
+
+            # Read next frame
+            has_frame, frame = source.read()
 
     except KeyboardInterrupt:
         print("\n[INFO] Interrupted by user.")

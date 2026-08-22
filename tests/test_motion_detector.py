@@ -10,6 +10,7 @@ from src.motion_detector import MotionDetector, parse_sections, get_box_sections
 from src.classifier import ObjectClassifier
 from src.logger import MotionLogger
 from src.capture import create_capture_source
+from src.config import load_config, save_config, DEFAULT_CONFIG
 
 
 @pytest.fixture
@@ -199,4 +200,21 @@ def test_section_filtering_ignores_unmonitored_zones():
     res_s4 = detector_s4.detect(frame_motion_in_s4)
     assert res_s4["has_motion"] is True
     assert len(res_s4["boxes"]) >= 1
+
+
+def test_config_load_and_save(temp_workspace):
+    """Verify loading and saving configuration parameters."""
+    cfg_path = os.path.join(temp_workspace, "custom_config.json")
+
+    # Load from non-existent file returns default
+    cfg = load_config(cfg_path)
+    assert cfg["min_area_pixels"] == DEFAULT_CONFIG["min_area_pixels"]
+
+    # Save new settings
+    save_config({"min_area_pixels": 2500, "min_area_percent": 1.25}, cfg_path)
+
+    loaded = load_config(cfg_path)
+    assert loaded["min_area_pixels"] == 2500
+    assert loaded["min_area_percent"] == 1.25
+
 
