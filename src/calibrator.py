@@ -25,13 +25,14 @@ def run_calibration(
     print("      Starting Visual Motion Size Calibrator")
     print("=" * 60)
     print("Controls:")
-    print("  [+] or [UP Arrow]     : Increase square size by +10%")
-    print("  [-] or [DOWN Arrow]   : Decrease square size by -10%")
-    print("  [Page Up]             : Increase square size by +50%")
-    print("  [Page Down]           : Decrease square size by -50%")
-    print("  [T]                   : Type custom percentage change in console")
-    print("  [Enter] or [Space]    : Accept and save minimum size")
-    print("  [Esc] or [Q]          : Cancel without saving")
+    print("  [+] or [UP Arrow] / [W]   : Increase square size by +10%")
+    print("  [-] or [DOWN Arrow] / [S] : Decrease square size by -10%")
+    print("  [Right Arrow] / []]       : Fine increase (+2%)")
+    print("  [Left Arrow] / [[]        : Fine decrease (-2%)")
+    print("  [Page Up] / [Page Down]   : +/-50%")
+    print("  [T]                       : Type custom percentage change in console")
+    print("  [Enter] or [Space]        : Accept and save minimum size")
+    print("  [Esc] or [Q]              : Cancel without saving")
     print("=" * 60)
 
     # Grab a frame
@@ -98,7 +99,7 @@ def run_calibration(
 
         # HUD Text
         hud_line1 = f"MINIMAL MOTION SIZE: {side_len}x{side_len} px | Area: {actual_area:,} px^2 ({actual_percent:.2f}% of screen)"
-        hud_line2 = "[+/-] or [Up/Down]: +/-10% | [PgUp/PgDn]: +/-50% | [T]: Type % | [Enter]: Save | [Esc]: Cancel"
+        hud_line2 = "[Up/W]: +10% | [Down/S]: -10% | [PgUp/PgDn]: +/-50% | [T]: Type % | [Enter]: Save | [Esc]: Cancel"
 
         cv2.putText(display, hud_line1, (15, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2, cv2.LINE_AA)
         cv2.putText(display, hud_line2, (15, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
@@ -109,21 +110,27 @@ def run_calibration(
 
         cv2.imshow(window_name, display)
 
-        # Wait for key
-        key = cv2.waitKey(0)
+        # Wait for key with full extended keycode support
+        key = cv2.waitKeyEx(0)
 
-        # Key mappings
-        # '+' or '=' or Up arrow
-        if key in (ord("+"), ord("="), 2490368, 0, 82):  # 82/2490368 is Up Arrow
+        # Key mappings:
+        # Increase (+10%): Up Arrow (Windows: 2490368, Linux: 65362), '+', '=', 'w', 'W'
+        if key in (2490368, 65362, ord("+"), ord("="), ord("w"), ord("W")):
             current_percent = max(0.01, current_percent * 1.10)
-        # '-' or '_' or Down arrow
-        elif key in (ord("-"), ord("_"), 2621440, 1, 84):  # 84/2621440 is Down Arrow
+        # Decrease (-10%): Down Arrow (Windows: 2621440, Linux: 65364), '-', '_', 's', 'S'
+        elif key in (2621440, 65364, ord("-"), ord("_"), ord("s"), ord("S")):
             current_percent = max(0.01, current_percent * 0.90)
-        # Page Up
-        elif key in (2162688, 85):
+        # Right Arrow / ']': Fine increase (+2%)
+        elif key in (2555904, 65363, ord("]")):
+            current_percent = max(0.01, current_percent * 1.02)
+        # Left Arrow / '[': Fine decrease (-2%)
+        elif key in (2424832, 65361, ord("[")):
+            current_percent = max(0.01, current_percent * 0.98)
+        # Page Up: +50%
+        elif key in (2162688, 65365):
             current_percent = max(0.01, current_percent * 1.50)
-        # Page Down
-        elif key in (2228224, 86):
+        # Page Down: -50%
+        elif key in (2228224, 65366):
             current_percent = max(0.01, current_percent * 0.50)
         # 't' or 'T': type custom change
         elif key in (ord("t"), ord("T")):
