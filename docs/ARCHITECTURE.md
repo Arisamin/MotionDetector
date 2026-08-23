@@ -19,4 +19,16 @@
 - [x] **Milestone 1:** Core motion detection & YOLOv8 classification pipeline.
 - [x] **Milestone 2:** Stream/screen capture, visual size calibration (`--calibrate`), and quadrant filtering (`--sections`).
 - [x] **Milestone 3:** Async Telegram notifications with snapshot photos to `ReolinkMotionDetector`.
+- [x] **Milestone 3.5 (Reolink Watchdog & Fixes):**
+  - Reolink on-screen time-strip monitor (checks seconds ticking in upper HUD).
+  - Stream freeze detection (>10s inactivity threshold).
+  - BlueStacks auto-window handle & viewport targeting with foreground activation.
+  - Android touch registration fix (120ms press-hold duration).
 - [ ] **Milestone 4:** Headless ReDroid Docker deployment & ADB orchestrator on Hetzner.
+
+## Component Reference
+
+### Reolink Watchdog (`src/reolink_keeper.py`)
+- **Time Strip Monitoring:** Continuously extracts the upper camera timestamp strip (`MM/DD/YYYY HH:MM:SS DOW`).
+- **Freeze Detection:** Calculates pixel diff on the seconds digits. If unchanged for $\ge 10$ seconds (`--freeze-timeout`), triggers reactivation.
+- **Window Targeting:** Automatically enumerates visible Windows handles matching `BlueStacks App Player` / `Reolink`, computes video center coordinates, brings window to foreground, and dispatches a 120ms touch click.
