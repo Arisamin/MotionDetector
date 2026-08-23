@@ -14,6 +14,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "telegram_enabled": True,
     "telegram_bot_token": "",
     "telegram_chat_id": "",
+    "reolink_mode": False,
+    "freeze_timeout_seconds": 10.0,
 }
 
 CONFIG_FILE = "config.json"

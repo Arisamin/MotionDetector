@@ -11,6 +11,7 @@ from src.capture import create_capture_source
 from src.config import load_config
 from src.calibrator import run_calibration
 from src.notifier import TelegramNotifier
+from src.reolink_keeper import ReolinkWatchdog
 
 
 def parse_args():
@@ -24,6 +25,18 @@ def parse_args():
         type=str,
         default="0",
         help="Input source: video file path (.mp4/.avi), RTSP/HTTP stream URL, webcam index (e.g. '0'), or 'screen'.",
+    )
+    parser.add_argument(
+        "--reolink",
+        action="store_true",
+        default=cfg.get("reolink_mode", False),
+        help="Enable Reolink time-strip watchdog to detect frozen stream and auto-click to reactivate.",
+    )
+    parser.add_argument(
+        "--freeze-timeout",
+        type=float,
+        default=cfg.get("freeze_timeout_seconds", 10.0),
+        help="Seconds of frozen camera clock before auto-clicking the app screen (default: 10.0).",
     )
     parser.add_argument(
         "--calibrate",
@@ -127,6 +140,7 @@ def run_pipeline(args):
     print("=" * 60)
     print("      Starting MotionDetector Agent")
     print(f" Source:      {args.source}")
+    print(f" Reolink Mode: {'ENABLED (Freeze Watchdog >' + str(args.freeze_timeout) + 's)' if args.reolink else 'DISABLED'}")
     print(f" Sections:    {sections_display} (1=TL, 2=TR, 3=BL, 4=BR)")
     print(f" Headless:    {args.headless}")
     print(f" Model:       {args.model} (conf={args.conf})")
@@ -184,10 +198,16 @@ def run_pipeline(args):
         chat_id=args.telegram_chat_id,
         enabled=args.telegram,
     )
+    watchdog = ReolinkWatchdog(
+        enabled=args.reolink,
+        freeze_timeout=args.freeze_timeout,
+    )
     if notifier.enabled:
         print("[INFO] Telegram Notifications: ENABLED (Group: ReolinkMotionDetector)")
     else:
         print("[INFO] Telegram Notifications: DISABLED")
+    if watchdog.enabled:
+        print(f"[INFO] Reolink Watchdog: ACTIVE (Clock monitoring enabled, threshold={args.freeze_timeout}s)")
 
     frame_count = 0
     total_events = 0
@@ -213,6 +233,10 @@ def run_pipeline(args):
 
             # Step 1: Detect motion
             motion_res = detector.detect(frame)
+
+            # Step 1.5: Reolink Stream Freeze Watchdog
+            if watchdog.enabled:
+                watchdog.check_frame(frame)
 
             # Step 2: If motion is present, classify objects
             detections = []

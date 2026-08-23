@@ -12,6 +12,7 @@ from src.logger import MotionLogger
 from src.capture import create_capture_source
 from src.config import load_config, save_config, DEFAULT_CONFIG
 from src.notifier import TelegramNotifier
+from src.reolink_keeper import ReolinkWatchdog
 
 
 @pytest.fixture
@@ -245,6 +246,33 @@ def test_telegram_notifier_enqueue_and_format():
     notifier.send_alert(event)
     assert notifier._queue.qsize() >= 0
     notifier.stop()
+
+
+def test_reolink_watchdog_detects_frozen_clock():
+    """Verify ReolinkWatchdog triggers reactivation when timestamp stops ticking."""
+    # Create synthetic frame with timestamp text
+    frame_t1 = np.zeros((200, 600, 3), dtype=np.uint8)
+    cv2.putText(frame_t1, "08/23/2026 12:19:05 SUN", (50, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+
+    frame_t2 = np.zeros((200, 600, 3), dtype=np.uint8)
+    cv2.putText(frame_t2, "08/23/2026 12:19:06 SUN", (50, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+
+    watchdog = ReolinkWatchdog(enabled=True, freeze_timeout=0.2, click_cooldown=0.1)
+
+    # Initial frame
+    assert watchdog.check_frame(frame_t1) is False
+
+    # Second ticking frame -> resets timer, should not trigger
+    assert watchdog.check_frame(frame_t2) is False
+
+    # Simulate clock freeze by providing same frame and advancing last_change_time
+    import time
+    time.sleep(0.25)
+    # Checking same frozen frame after timeout should trigger reactivation click
+    triggered = watchdog.check_frame(frame_t2)
+    assert triggered is True
+    assert watchdog.freeze_count >= 1
+
 
 
 
