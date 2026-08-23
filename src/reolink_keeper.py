@@ -2,7 +2,7 @@
 
 Monitors the Reolink on-screen timestamp strip (clock/seconds).
 If the clock freezes for more than the timeout (default 10s), automatically
-dispatches a simulated mouse click to resume the live stream.
+dispatches a targeted simulated mouse click to resume the live stream.
 """
 import os
 import sys
@@ -10,7 +10,45 @@ import time
 import ctypes
 import cv2
 import numpy as np
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
+
+
+def find_bluestacks_or_reolink_window() -> Tuple[Optional[int], Optional[Tuple[int, int, int, int]]]:
+    """
+    Locate the BlueStacks or Reolink window handle and screen rectangle.
+    Returns (hwnd, (left, top, right, bottom)) or (None, None).
+    """
+    if sys.platform != "win32":
+        return None, None
+
+    user32 = ctypes.windll.user32
+    target_keywords = ["bluestacks app player", "bluestacks", "reolink", "hd-player"]
+    found_hwnd = None
+    found_rect = None
+
+    def enum_proc(hwnd, lParam):
+        nonlocal found_hwnd, found_rect
+        if user32.IsWindowVisible(hwnd):
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length > 0:
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, length + 1)
+                title = buf.value.lower()
+                for kw in target_keywords:
+                    if kw in title:
+                        rect = (ctypes.c_long * 4)()
+                        user32.GetWindowRect(hwnd, rect)
+                        w = rect[2] - rect[0]
+                        h = rect[3] - rect[1]
+                        if w > 250 and h > 250:
+                            found_hwnd = hwnd
+                            found_rect = (rect[0], rect[1], rect[2], rect[3])
+                            return False  # stop enumeration
+        return True
+
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    user32.EnumWindows(WNDENUMPROC(enum_proc), 0)
+    return found_hwnd, found_rect
 
 
 class ReolinkWatchdog:
@@ -30,12 +68,11 @@ class ReolinkWatchdog:
         :param click_cooldown: Minimum seconds between click attempts (default: 5.0s).
         :param roi: Optional relative (x_rel, y_rel, w_rel, h_rel) for the timestamp strip.
                     Defaults to top 15% strip of frame: (0.1, 0.0, 0.8, 0.15).
-        :param click_target: Optional screen (x, y) coordinates for the click. If None, uses frame center.
+        :param click_target: Optional screen (x, y) coordinates for the click. If None, auto-detects window center.
         """
         self.enabled = enabled
         self.freeze_timeout = freeze_timeout
         self.click_cooldown = click_cooldown
-        # Default timestamp strip: upper portion of the frame where timestamp and reolink logo sit
         self.roi_rel = roi if roi is not None else (0.10, 0.0, 0.80, 0.15)
         self.click_target = click_target
 
@@ -56,10 +93,10 @@ class ReolinkWatchdog:
 
     def check_frame(self, frame: np.ndarray, screen_pos: Optional[Tuple[int, int]] = None) -> bool:
         """
-        Check if the timestamp has updated in this frame. If frozen, triggers a click.
+        Check if the timestamp has updated in this frame. If frozen, triggers a targeted click.
 
         :param frame: Current BGR video/screen frame.
-        :param screen_pos: Optional (x, y) top-left screen position of the frame (for screen clicks).
+        :param screen_pos: Optional (x, y) top-left screen position of the frame.
         :return: True if a click was dispatched to reactivate, False otherwise.
         """
         if not self.enabled or frame is None or frame.size == 0:
@@ -76,10 +113,9 @@ class ReolinkWatchdog:
 
         # Compute absolute difference in the timestamp strip
         diff = cv2.absdiff(self.last_roi_gray, gray)
-        # Count pixels that changed significantly (digits ticking)
         changed_pixels = np.count_nonzero(diff > 25)
 
-        # A change in seconds digits typically modifies 20-500 pixels in the ROI
+        # A change in seconds digits typically modifies 15-500 pixels in the ROI
         if changed_pixels >= 15:
             self.last_change_time = now
             self.last_roi_gray = gray.copy()
@@ -91,21 +127,31 @@ class ReolinkWatchdog:
         if frozen_duration >= self.freeze_timeout and (now - self.last_click_time >= self.click_cooldown):
             self.freeze_count += 1
             print(f"\n[WARN] [Reolink Watchdog] Camera clock frozen for {frozen_duration:.1f}s (> {self.freeze_timeout:.0f}s threshold)!")
-            print(f"[INFO] [Reolink Watchdog] Dispatching reactivation click #{self.freeze_count} on Reolink app screen...")
 
             # Determine click coordinates
-            h, w = frame.shape[:2]
+            target_hwnd = None
             if self.click_target is not None:
                 click_x, click_y = self.click_target
-            elif screen_pos is not None:
-                click_x = screen_pos[0] + w // 2
-                click_y = screen_pos[1] + h // 2
             else:
-                # Default: center of primary screen / window
-                click_x = w // 2
-                click_y = h // 2
+                # Auto-locate BlueStacks / Reolink window on screen
+                hwnd, rect = find_bluestacks_or_reolink_window()
+                if hwnd and rect:
+                    target_hwnd = hwnd
+                    # Click slightly off-center (center of video viewport in BlueStacks)
+                    click_x = (rect[0] + rect[2]) // 2
+                    click_y = (rect[1] + rect[3]) // 2
+                    print(f"[INFO] [Reolink Watchdog] Located BlueStacks window (HWND: {hwnd}) at {rect}. Target: ({click_x}, {click_y})")
+                elif screen_pos is not None:
+                    h, w = frame.shape[:2]
+                    click_x = screen_pos[0] + w // 2
+                    click_y = screen_pos[1] + h // 2
+                else:
+                    h, w = frame.shape[:2]
+                    click_x = w // 2
+                    click_y = h // 2
 
-            self._send_mouse_click(click_x, click_y)
+            print(f"[INFO] [Reolink Watchdog] Dispatching reactivation click #{self.freeze_count} at ({click_x}, {click_y})...")
+            self._send_mouse_click(click_x, click_y, target_hwnd=target_hwnd)
             self.last_click_time = now
             self.last_change_time = now  # Reset timer to give stream time to buffer
             self.last_roi_gray = gray.copy()
@@ -113,35 +159,47 @@ class ReolinkWatchdog:
 
         return False
 
-    def _send_mouse_click(self, x: int, y: int):
-        """Simulate a mouse click at screen coordinates (x, y)."""
+    def _send_mouse_click(self, x: int, y: int, target_hwnd: Optional[int] = None):
+        """Simulate a mouse click at screen coordinates (x, y) with window focus and Android touch duration."""
         if sys.platform == "win32":
             try:
+                user32 = ctypes.windll.user32
+
                 # Save current cursor position
                 class POINT(ctypes.Structure):
                     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
                 orig_pt = POINT()
-                ctypes.windll.user32.GetCursorPos(ctypes.byref(orig_pt))
+                user32.GetCursorPos(ctypes.byref(orig_pt))
 
-                # Move to target and click
-                ctypes.windll.user32.SetCursorPos(int(x), int(y))
-                time.sleep(0.05)
-                # MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004
-                ctypes.windll.user32.mouse_event(0x0002, 0, 0, 0, 0)
-                time.sleep(0.05)
-                ctypes.windll.user32.mouse_event(0x0004, 0, 0, 0, 0)
-                time.sleep(0.05)
+                # Bring target window to foreground if known
+                if target_hwnd:
+                    user32.ShowWindow(target_hwnd, 5)  # SW_SHOW
+                    user32.SetForegroundWindow(target_hwnd)
+                    time.sleep(0.08)
+
+                # Move to target position
+                user32.SetCursorPos(int(x), int(y))
+                time.sleep(0.06)
+
+                # Send Left Button Down (0x0002)
+                user32.mouse_event(0x0002, 0, 0, 0, 0)
+                # Hold down for 120ms (crucial for Android/BlueStacks touch registration)
+                time.sleep(0.12)
+                # Send Left Button Up (0x0004)
+                user32.mouse_event(0x0004, 0, 0, 0, 0)
+                time.sleep(0.08)
 
                 # Restore cursor position
-                ctypes.windll.user32.SetCursorPos(orig_pt.x, orig_pt.y)
-                print(f"[SUCCESS] [Reolink Watchdog] Simulated click sent at ({x}, {y}) and cursor restored.")
+                user32.SetCursorPos(orig_pt.x, orig_pt.y)
+                print(f"[SUCCESS] [Reolink Watchdog] Click delivered to BlueStacks and cursor restored.")
             except Exception as e:
                 print(f"[ERROR] [Reolink Watchdog] Win32 click simulation failed: {e}", file=sys.stderr)
         else:
             # Fallback for Linux / X11 / Headless ADB
-            print(f"[INFO] [Reolink Watchdog] Non-Windows platform: Simulating tap at ({x}, {y}).")
+            print(f"[INFO] [Reolink Watchdog] Sending Android tap at ({x}, {y}) via ADB.")
             try:
                 os.system(f"adb shell input tap {x} {y} > /dev/null 2>&1")
             except Exception:
                 pass
+
