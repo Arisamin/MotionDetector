@@ -13,6 +13,7 @@ from src.capture import create_capture_source
 from src.config import load_config, save_config, DEFAULT_CONFIG
 from src.notifier import TelegramNotifier
 from src.reolink_keeper import ReolinkWatchdog
+from src.orchestrator import Orchestrator
 
 
 @pytest.fixture
@@ -272,6 +273,20 @@ def test_reolink_watchdog_detects_frozen_clock():
     triggered = watchdog.check_frame(frame_t2)
     assert triggered is True
     assert watchdog.freeze_count >= 1
+
+
+def test_orchestrator_initialization_and_mode():
+    """Verify Orchestrator initialization and emulator detection logic."""
+    orch_local = Orchestrator(mode="local")
+    assert orch_local.mode == "local"
+
+    orch_redroid = Orchestrator(mode="redroid")
+    assert orch_redroid.mode == "redroid"
+
+    # Verify auto mode resolves correctly
+    orch_auto = Orchestrator(mode="auto")
+    assert orch_auto.mode in ("local", "redroid")
+
 
 
 
