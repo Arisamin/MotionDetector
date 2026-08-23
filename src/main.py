@@ -14,11 +14,12 @@ from src.notifier import TelegramNotifier
 from src.reolink_keeper import ReolinkWatchdog
 
 
-def parse_args():
+def parse_args(args_list=None):
     cfg = load_config()
 
     parser = argparse.ArgumentParser(
-        description="Autonomous Motion Detector & Object Classifier Agent for Camera Feeds."
+        description="Autonomous Motion Detector & Object Classifier Agent for Camera Feeds.",
+        allow_abbrev=False,
     )
     parser.add_argument(
         "--source",
@@ -122,7 +123,7 @@ def parse_args():
         default="snapshots",
         help="Directory to save snapshot images (default: snapshots).",
     )
-    return parser.parse_args()
+    return parser.parse_args(args_list)
 
 
 def run_pipeline(args):

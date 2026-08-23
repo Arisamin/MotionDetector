@@ -213,7 +213,8 @@ class Orchestrator:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Autonomous Orchestrator for BlueStacks/ReDroid & MotionDetector."
+        description="Autonomous Orchestrator for BlueStacks/ReDroid & MotionDetector.",
+        allow_abbrev=False,
     )
     parser.add_argument(
         "--mode",
@@ -273,8 +274,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Pass full parsed args to main pipeline
-    pipeline_args = parse_args()
+    # Pass full parsed args to main pipeline with clean defaults
+    pipeline_args = parse_args(args_list=[])
     pipeline_args.source = args.source
     if args.sections is not None:
         pipeline_args.sections = args.sections
