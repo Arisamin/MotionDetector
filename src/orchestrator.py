@@ -31,6 +31,22 @@ BLUESTACKS_ADB_PATHS = [
 REOLINK_PACKAGE = "com.mcu.reolink"
 
 
+def get_bluestacks_instance_name() -> str:
+    """Read the active BlueStacks instance name from bluestacks.conf."""
+    conf_path = r"C:\ProgramData\BlueStacks_nxt\bluestacks.conf"
+    if os.path.exists(conf_path):
+        try:
+            with open(conf_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if "bst.instance." in line and (".status.adb_port" in line or ".adb_port" in line):
+                        parts = line.split(".")
+                        if len(parts) >= 3:
+                            return parts[2]
+        except Exception:
+            pass
+    return "Nougat32"
+
+
 class Orchestrator:
     """Orchestrates emulator lifecycle, Reolink app automation, and MotionDetector monitoring."""
 
@@ -130,26 +146,73 @@ class Orchestrator:
         """Launch the Reolink app and open the camera stream."""
         print("[INFO] [Orchestrator] Launching Reolink app...")
 
-        # Try ADB launch first
-        adb_success = self._launch_via_adb()
-        if adb_success:
-            print("[SUCCESS] [Orchestrator] Reolink app launched via ADB.")
-            time.sleep(4.0)  # Allow app UI to load
-            self._tap_camera_stream_adb()
-            return True
+        launched = False
+        if self.mode == "local" and self.bluestacks_path and os.path.exists(self.bluestacks_path):
+            launched = self._launch_via_bluestacks_cmd()
 
-        # Fallback: if BlueStacks is running on Windows, bring window to focus
+        if not launched:
+            launched = self._launch_via_adb()
+
+        if launched:
+            print("[SUCCESS] [Orchestrator] Reolink app launch command dispatched. Waiting 5s for camera list...")
+            time.sleep(5.0)
+
+        # Focus window and tap camera card to start live stream
         if self.mode == "local":
             hwnd, rect = find_bluestacks_or_reolink_window()
             if hwnd and rect:
-                print(f"[INFO] [Orchestrator] BlueStacks window active at {rect}. Focusing window.")
+                print(f"[INFO] [Orchestrator] BlueStacks window active at {rect}. Activating camera stream...")
                 import ctypes
-                ctypes.windll.user32.ShowWindow(hwnd, 5)  # SW_SHOW
-                ctypes.windll.user32.SetForegroundWindow(hwnd)
+                user32 = ctypes.windll.user32
+                user32.ShowWindow(hwnd, 5)  # SW_SHOW
+                user32.SetForegroundWindow(hwnd)
                 time.sleep(1.0)
+                # Tap center of the camera card inside BlueStacks
+                tap_x = (rect[0] + rect[2]) // 2
+                tap_y = (rect[1] + rect[3]) // 2
+                self._send_local_tap(tap_x, tap_y)
+                time.sleep(2.0)
                 return True
+        else:
+            self._tap_camera_stream_adb()
+            return True
 
-        return False
+        return launched
+
+    def _launch_via_bluestacks_cmd(self) -> bool:
+        """Launch Reolink using BlueStacks HD-Player command line."""
+        instance_name = get_bluestacks_instance_name()
+        print(f"[INFO] [Orchestrator] Launching {REOLINK_PACKAGE} via HD-Player on instance '{instance_name}'...")
+        try:
+            cmd = [
+                self.bluestacks_path,
+                "--instance",
+                instance_name,
+                "--cmd",
+                "launchApp",
+                "--package",
+                REOLINK_PACKAGE,
+            ]
+            res = subprocess.run(cmd, capture_output=True, timeout=10)
+            return res.returncode == 0
+        except Exception as e:
+            print(f"[WARN] [Orchestrator] HD-Player app launch failed: {e}", file=sys.stderr)
+            return False
+
+    def _send_local_tap(self, x: int, y: int):
+        """Simulate a click/tap on the camera stream card."""
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                user32.SetCursorPos(int(x), int(y))
+                time.sleep(0.06)
+                user32.mouse_event(0x0002, 0, 0, 0, 0)
+                time.sleep(0.12)
+                user32.mouse_event(0x0004, 0, 0, 0, 0)
+                print(f"[SUCCESS] [Orchestrator] Tapped camera card at ({x}, {y}).")
+            except Exception:
+                pass
 
     def _launch_via_adb(self) -> bool:
         if not self.adb_path:
