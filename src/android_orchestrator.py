@@ -87,22 +87,25 @@ class AndroidOrchestrator:
 
     def run_pipeline(
         self,
-        min_area: int = 2500,
+        min_area: int = 5000,
         conf_threshold: float = 0.35,
-        cooldown: float = 3.0,
-        mask_top_percent: float = 0.12,
-        mask_bottom_percent: float = 0.12,
+        cooldown: float = 5.0,
+        mask_top_percent: float = 0.15,
+        mask_bottom_percent: float = 0.15,
         freeze_timeout: float = 10.0,
+        var_threshold: float = 25.0,
+        consecutive_frames_required: int = 3,
     ):
         """Runs the motion detection loop on Android."""
-        logger.info(f"Starting on-device motion detection (min_area={min_area} px, mask_top={mask_top_percent:.0%}, mask_bottom={mask_bottom_percent:.0%}, freeze_timeout={freeze_timeout}s)...")
+        logger.info(f"Starting on-device motion detection (min_area={min_area} px, mask_top={mask_top_percent:.0%}, mask_bottom={mask_bottom_percent:.0%}, var_thresh={var_threshold}, persist={consecutive_frames_required} frames, freeze_timeout={freeze_timeout}s)...")
         
         capture_source = AndroidNativeCaptureSource()
         detector = MotionDetector(
             min_area=min_area,
+            var_threshold=var_threshold,
             mask_top_percent=mask_top_percent,
             mask_bottom_percent=mask_bottom_percent,
-            consecutive_frames_required=2,
+            consecutive_frames_required=consecutive_frames_required,
         )
         classifier = ObjectClassifier(confidence_threshold=conf_threshold)
         logger_service = MotionLogger(cooldown_seconds=cooldown)
@@ -148,7 +151,8 @@ class AndroidOrchestrator:
                         if logged and self.notifier:
                             self.notifier.send_alert(logged)
                             summary = ", ".join(f"{d['category']} ({d['confidence']:.0%})" for d in detections)
-                            logger.info(f"Alert dispatched: {summary}")
+                            boxes_info = ", ".join(f"(x={b[0]}, y={b[1]}, w={b[2]}, h={b[3]}, area={b[2]*b[3]})" for b in motion_res["boxes"])
+                            logger.info(f"Alert dispatched: {summary} | Boxes: [{boxes_info}]")
 
                 # Sleep slightly to conserve CPU/battery
                 time.sleep(0.1)
@@ -165,10 +169,11 @@ def main():
     parser = argparse.ArgumentParser(description="Android Native Motion Detector Orchestrator")
     parser.add_argument("--tap-x", type=int, default=800, help="X coordinate to tap camera card (default: 800)")
     parser.add_argument("--tap-y", type=int, default=450, help="Y coordinate to tap camera card (default: 450)")
-    parser.add_argument("--min-area", type=int, default=None, help="Minimum contour area in px (default: from config.json or 2500 px)")
+    parser.add_argument("--min-area", type=int, default=None, help="Minimum contour area in px (default: 5000 px)")
     parser.add_argument("--conf", type=float, default=0.35, help="YOLO confidence threshold")
-    parser.add_argument("--cooldown", type=float, default=3.0, help="Alert cooldown in seconds (default: 3.0s)")
-    parser.add_argument("--mask-top", type=float, default=0.08, help="Fraction of top screen to mask (default: 0.08)")
+    parser.add_argument("--cooldown", type=float, default=5.0, help="Alert cooldown in seconds (default: 5.0s)")
+    parser.add_argument("--mask-top", type=float, default=0.15, help="Fraction of top screen to mask (default: 0.15)")
+    parser.add_argument("--mask-bottom", type=float, default=0.15, help="Fraction of bottom screen to mask (default: 0.15)")
     parser.add_argument("--freeze-timeout", type=float, default=10.0, help="Seconds before reactivating frozen stream (default: 10.0s)")
     args = parser.parse_args()
 
@@ -176,7 +181,7 @@ def main():
     orchestrator.launch_reolink()
     
     cfg = orchestrator.config
-    min_area = args.min_area if args.min_area is not None else cfg.get("min_area_pixels", 2500)
+    min_area = args.min_area if args.min_area is not None else cfg.get("min_area_pixels", 5000)
     freeze_timeout = args.freeze_timeout if args.freeze_timeout is not None else cfg.get("freeze_timeout_seconds", 10.0)
 
     # Wait for app to open then tap to start stream
@@ -190,6 +195,7 @@ def main():
         conf_threshold=args.conf,
         cooldown=args.cooldown,
         mask_top_percent=args.mask_top,
+        mask_bottom_percent=args.mask_bottom,
         freeze_timeout=freeze_timeout,
     )
 

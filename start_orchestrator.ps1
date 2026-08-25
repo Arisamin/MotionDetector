@@ -41,23 +41,20 @@ Write-Host "[OK] Connected to BlueStacks device: $deviceId" -ForegroundColor Gre
 Write-Host "[INFO] Syncing files to BlueStacks..." -ForegroundColor Cyan
 & $adbPath -s $deviceId push C:\MyData\Git\MotionDetector\src /sdcard/MotionDetector/ | Out-Null
 & $adbPath -s $deviceId push C:\MyData\Git\MotionDetector\android /sdcard/MotionDetector/ | Out-Null
+if (Test-Path "C:\MyData\Git\MotionDetector\config.json") {
+    & $adbPath -s $deviceId push C:\MyData\Git\MotionDetector\config.json /sdcard/MotionDetector/ | Out-Null
+}
 
-Write-Host "[INFO] Bringing Termux to foreground..." -ForegroundColor Cyan
-
-# Bring Termux to front
+Write-Host "[INFO] Restarting Termux with updated code..." -ForegroundColor Cyan
+& $adbPath -s $deviceId shell "am force-stop com.termux" | Out-Null
+Start-Sleep -Seconds 1
 & $adbPath -s $deviceId shell "am start -n com.termux/.app.TermuxActivity" | Out-Null
 Start-Sleep -Seconds 2
 
 Write-Host "[INFO] Launching Orchestrator inside Termux..." -ForegroundColor Cyan
 
 # Send execution command to Termux
-& $adbPath -s $deviceId shell "input text cp%s-r%s/sdcard/MotionDetector/*%s~/MotionDetector/"
-& $adbPath -s $deviceId shell "input keyevent 66"
-Start-Sleep -Seconds 1
-& $adbPath -s $deviceId shell "input text cd%s~/MotionDetector"
-& $adbPath -s $deviceId shell "input keyevent 66"
-Start-Sleep -Seconds 1
-& $adbPath -s $deviceId shell "input text bash%sandroid/run.sh"
+& $adbPath -s $deviceId shell "input text bash%s/sdcard/MotionDetector/android/run.sh"
 & $adbPath -s $deviceId shell "input keyevent 66"
 
 Start-Sleep -Seconds 3
