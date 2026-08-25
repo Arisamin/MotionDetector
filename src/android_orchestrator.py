@@ -90,14 +90,20 @@ class AndroidOrchestrator:
         min_area: int = 2500,
         conf_threshold: float = 0.35,
         cooldown: float = 3.0,
-        mask_top_percent: float = 0.08,
+        mask_top_percent: float = 0.12,
+        mask_bottom_percent: float = 0.12,
         freeze_timeout: float = 10.0,
     ):
         """Runs the motion detection loop on Android."""
-        logger.info(f"Starting on-device motion detection (min_area={min_area} px, mask_top={mask_top_percent:.0%}, freeze_timeout={freeze_timeout}s)...")
+        logger.info(f"Starting on-device motion detection (min_area={min_area} px, mask_top={mask_top_percent:.0%}, mask_bottom={mask_bottom_percent:.0%}, freeze_timeout={freeze_timeout}s)...")
         
         capture_source = AndroidNativeCaptureSource()
-        detector = MotionDetector(min_area=min_area, mask_top_percent=mask_top_percent)
+        detector = MotionDetector(
+            min_area=min_area,
+            mask_top_percent=mask_top_percent,
+            mask_bottom_percent=mask_bottom_percent,
+            consecutive_frames_required=2,
+        )
         classifier = ObjectClassifier(confidence_threshold=conf_threshold)
         logger_service = MotionLogger(cooldown_seconds=cooldown)
         watchdog = ReolinkWatchdog(enabled=True, freeze_timeout=freeze_timeout)
@@ -106,6 +112,8 @@ class AndroidOrchestrator:
             self.notifier.send_message("Android Orchestrator started. Monitoring Reolink stream on-device.")
 
         frame_count = 0
+        suppress_alerts_until = time.time() + 4.0  # Initial 4s startup warmup
+
         try:
             while True:
                 ret, frame = capture_source.read()
@@ -114,17 +122,22 @@ class AndroidOrchestrator:
                     continue
 
                 frame_count += 1
+                now = time.time()
 
                 # Reolink stream freeze watchdog (checks clock in unmasked top HUD)
                 clicked = watchdog.check_frame(frame)
                 if clicked:
                     logger.info("Watchdog detected frozen clock - dispatched wake-up tap.")
+                    detector.reset_background()
+                    suppress_alerts_until = now + 8.0
+                    logger.info("Wake-up active: Suppressing motion alerts for 8.0s while stream stabilizes...")
 
-                # Motion detection (with HUD masked out to prevent clock false positives)
+                # Motion detection (with HUD & controls masked out + temporal persistence)
                 motion_res = detector.detect(frame)
 
-                # Skip alert dispatch during initial 30 frames (MOG2 background warmup)
-                if frame_count <= 30:
+                # Skip alert dispatch during startup / wake-up stabilization window
+                is_suppressed = now < suppress_alerts_until
+                if is_suppressed:
                     time.sleep(0.1)
                     continue
 

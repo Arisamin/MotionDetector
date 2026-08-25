@@ -219,6 +219,7 @@ def run_pipeline(args):
 
     frame = first_frame
     has_frame = True
+    suppress_alerts_until = time.time() + 3.0  # Initial 3s warmup
 
     try:
         while has_frame and frame is not None:
@@ -232,12 +233,26 @@ def run_pipeline(args):
                     fps = 10.0 / elapsed
                 last_fps_time = now
 
+            # Step 1.5: Reolink Stream Freeze Watchdog
+            if watchdog.enabled:
+                clicked = watchdog.check_frame(frame)
+                if clicked:
+                    detector.reset_background()
+                    suppress_alerts_until = now + 8.0
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] Reolink Watchdog wake-up click dispatched. Suppressing motion alerts for 8.0s.")
+
             # Step 1: Detect motion
             motion_res = detector.detect(frame)
 
-            # Step 1.5: Reolink Stream Freeze Watchdog
-            if watchdog.enabled:
-                watchdog.check_frame(frame)
+            # Skip alert dispatch during wake-up stabilization
+            if now < suppress_alerts_until:
+                if not args.headless:
+                    cv2.imshow("MotionDetector", frame)
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
+                ret, frame = source.read()
+                has_frame = ret
+                continue
 
             # Step 2: If motion is present, classify objects
             detections = []

@@ -1,24 +1,39 @@
 # Automated 1-click launcher for MotionDetector inside BlueStacks Termux
 
 $adbPath = "C:\Program Files\BlueStacks_nxt\HD-Adb.exe"
+$hdPlayer = "C:\Program Files\BlueStacks_nxt\HD-Player.exe"
+
 if (-not (Test-Path $adbPath)) {
     Write-Error "Could not find BlueStacks ADB at: $adbPath"
     exit 1
 }
 
-# Auto-detect the active online BlueStacks emulator instance
+# Auto-detect active BlueStacks emulator instance
 $devices = & $adbPath devices | Where-Object { $_ -match "\bdevice\b" -and $_ -notmatch "List of" }
+
 if (-not $devices) {
-    Write-Host "[INFO] No active emulator detected. Connecting to 127.0.0.1:5555..." -ForegroundColor Yellow
+    Write-Host "[INFO] BlueStacks is not running. Launching BlueStacks Nougat32 instance..." -ForegroundColor Yellow
+    if (Test-Path $hdPlayer) {
+        Start-Process $hdPlayer -ArgumentList "--instance Nougat32"
+        Write-Host "[INFO] Waiting 20 seconds for BlueStacks to boot..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 20
+    }
     & $adbPath connect 127.0.0.1:5555 | Out-Null
-    Start-Sleep -Seconds 2
+    Start-Sleep -Seconds 3
     $devices = & $adbPath devices | Where-Object { $_ -match "\bdevice\b" -and $_ -notmatch "List of" }
 }
 
 $deviceId = ($devices | ForEach-Object { ($_ -split "\s+")[0] } | Select-Object -First 1)
 
 if (-not $deviceId) {
-    Write-Error "No active BlueStacks device found. Please make sure BlueStacks is running."
+    Write-Host "[INFO] Waiting an additional 10 seconds for ADB device..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 10
+    $devices = & $adbPath devices | Where-Object { $_ -match "\bdevice\b" -and $_ -notmatch "List of" }
+    $deviceId = ($devices | ForEach-Object { ($_ -split "\s+")[0] } | Select-Object -First 1)
+}
+
+if (-not $deviceId) {
+    Write-Error "No active BlueStacks device found. Please make sure BlueStacks is started."
     exit 1
 }
 
