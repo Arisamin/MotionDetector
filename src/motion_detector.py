@@ -59,29 +59,32 @@ class MotionDetector:
 
     def __init__(
         self,
-        min_area: int = 500,
+        min_area: int = 2500,
         history: int = 500,
         var_threshold: float = 16.0,
         detect_shadows: bool = False,
         blur_kernel_size: Tuple[int, int] = (21, 21),
         dilation_iterations: int = 2,
         active_sections: Optional[Set[int]] = None,
+        mask_top_percent: float = 0.0,
     ):
         """
         Initialize the motion detector.
 
-        :param min_area: Minimum contour area in pixels to consider as motion.
+        :param min_area: Minimum contour area in pixels to consider as motion (default: 2500 px, >2x clock digits).
         :param history: Length of history for MOG2 background subtractor.
         :param var_threshold: Threshold on squared Mahalanobis distance.
         :param detect_shadows: Whether to detect and mark shadows.
         :param blur_kernel_size: Gaussian blur kernel size to reduce noise.
         :param dilation_iterations: Number of dilation iterations to bridge fragmented contours.
         :param active_sections: Set of allowed section numbers ({1, 2, 3, 4}) from which to report motion.
+        :param mask_top_percent: Fraction of top screen height to mask out (e.g. 0.08 for time strip).
         """
         self.min_area = min_area
         self.blur_kernel_size = blur_kernel_size
         self.dilation_iterations = dilation_iterations
         self.active_sections = active_sections if active_sections is not None else {1, 2, 3, 4}
+        self.mask_top_percent = mask_top_percent
 
         self.subtractor = cv2.createBackgroundSubtractorMOG2(
             history=history,
@@ -111,6 +114,11 @@ class MotionDetector:
 
         # Threshold to remove gray shadows if any
         _, thresh = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
+
+        # Mask out time strip banner if configured
+        if self.mask_top_percent > 0:
+            mask_h = int(h_frame * self.mask_top_percent)
+            thresh[:mask_h, :] = 0
 
         # Morphological dilation to merge nearby contours
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))

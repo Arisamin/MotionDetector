@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 from typing import Optional, Tuple
 import cv2
 import numpy as np
-import mss
 
 
 class BaseCaptureSource(ABC):
@@ -50,6 +49,7 @@ class ScreenCaptureSource(BaseCaptureSource):
         :param monitor_idx: Monitor index (1 = primary monitor, 0 = all monitors).
         :param region: Optional dict with {'top', 'left', 'width', 'height'}.
         """
+        import mss
         self.sct = mss.mss()
         if region is not None:
             self.monitor = region
@@ -77,9 +77,13 @@ class ScreenCaptureSource(BaseCaptureSource):
 
 def create_capture_source(source_str: str) -> BaseCaptureSource:
     """Factory helper to instantiate the appropriate capture source."""
-    if source_str.lower().startswith("screen"):
+    s_lower = source_str.lower().strip()
+    if s_lower.startswith("screen"):
         # e.g., "screen" or "screen:1"
         parts = source_str.split(":")
         idx = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
         return ScreenCaptureSource(monitor_idx=idx)
+    elif s_lower == "android":
+        from src.android_capture import AndroidNativeCaptureSource
+        return AndroidNativeCaptureSource()
     return OpenCVStreamSource(source_str)

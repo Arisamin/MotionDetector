@@ -126,6 +126,16 @@ class TelegramNotifier:
         # Enqueue task
         self._queue.put({"caption": caption, "photo_path": snapshot})
 
+    def send_message(self, text: str):
+        """Enqueue a direct text message to Telegram."""
+        if self.enabled and text:
+            self._queue.put({"caption": text, "photo_path": None})
+
+    def send_photo(self, photo_path: str, caption: str = ""):
+        """Enqueue a photo with optional caption to Telegram."""
+        if self.enabled and photo_path:
+            self._queue.put({"caption": caption, "photo_path": photo_path})
+
     def stop(self):
         """Stop background worker gracefully."""
         if self._running:

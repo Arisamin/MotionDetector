@@ -1,8 +1,17 @@
 """Object classification module using YOLOv8 to categorize detections into human, car, or other."""
 import os
+import logging
 from typing import List, Dict, Any, Optional
 import numpy as np
-from ultralytics import YOLO
+
+logger = logging.getLogger("ObjectClassifier")
+
+try:
+    from ultralytics import YOLO
+    HAS_ULTRALYTICS = True
+except ImportError:
+    HAS_ULTRALYTICS = False
+    logger.warning("Ultralytics/YOLO not found. Running in lightweight motion-only mode.")
 
 
 class ObjectClassifier:
@@ -31,8 +40,12 @@ class ObjectClassifier:
         self.model_name = model_name
         self.confidence_threshold = confidence_threshold
         self.device = device
-        # Model is loaded lazily or during init
-        self.model = YOLO(model_name)
+        self.model = None
+        if HAS_ULTRALYTICS:
+            try:
+                self.model = YOLO(model_name)
+            except Exception as e:
+                logger.warning(f"Could not load YOLO model {model_name}: {e}. Falling back to motion-only mode.")
 
     def map_class_to_category(self, class_name: str) -> str:
         """Map YOLO COCO class names to simplified category: human, car, other."""
@@ -53,6 +66,19 @@ class ObjectClassifier:
         """
         if frame is None or frame.size == 0:
             return []
+
+        # If no YOLO model loaded, return motion regions as 'other'
+        if self.model is None:
+            detections = []
+            if motion_boxes:
+                for (x, y, w, h) in motion_boxes:
+                    detections.append({
+                        "category": self.CATEGORY_OTHER,
+                        "raw_label": "motion_blob",
+                        "confidence": 1.0,
+                        "bbox": [int(x), int(y), int(x + w), int(y + h)],
+                    })
+            return detections
 
         # Run inference
         results = self.model(

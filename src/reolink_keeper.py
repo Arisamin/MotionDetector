@@ -196,10 +196,20 @@ class ReolinkWatchdog:
             except Exception as e:
                 print(f"[ERROR] [Reolink Watchdog] Win32 click simulation failed: {e}", file=sys.stderr)
         else:
-            # Fallback for Linux / X11 / Headless ADB
-            print(f"[INFO] [Reolink Watchdog] Sending Android tap at ({x}, {y}) via ADB.")
-            try:
-                os.system(f"adb shell input tap {x} {y} > /dev/null 2>&1")
-            except Exception:
-                pass
+            # Fallback for Android on-device / Linux / Headless ADB
+            print(f"[INFO] [Reolink Watchdog] Sending Android tap at ({x}, {y}) via input tap / ADB.")
+            import subprocess
+            commands = [
+                ["adb", "-s", "127.0.0.1:5555", "shell", "input", "tap", str(x), str(y)],
+                ["/system/bin/input", "tap", str(x), str(y)],
+                ["input", "tap", str(x), str(y)],
+            ]
+            for cmd in commands:
+                try:
+                    res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                    if res.returncode == 0:
+                        print(f"[SUCCESS] [Reolink Watchdog] Android tap delivered at ({x}, {y}) via {' '.join(cmd[:2])}")
+                        return
+                except Exception:
+                    continue
 
